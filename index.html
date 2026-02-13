@@ -9,21 +9,25 @@
     <script defer src="https://pyscript.net/releases/2023.05.1/pyscript.js"></script>
 
     <style>
+        /* --- VISUAL STYLING --- */
         body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f6f8; color: #333; }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
         p.subtitle { text-align: center; color: #7f8c8d; margin-bottom: 30px; }
 
+        /* Input Container */
         .container { 
             background: white; max-width: 900px; margin: 0 auto; padding: 30px; 
             border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;
         }
 
+        /* File Upload */
         input[type="file"] {
             border: 2px dashed #cbd5e0; padding: 20px; width: 100%; box-sizing: border-box;
             border-radius: 8px; background-color: #fafbfc; cursor: pointer;
         }
         input[type="file"]:hover { border-color: #4299e1; background-color: #ebf8ff; }
 
+        /* Action Button */
         .btn { 
             background-color: #cbd5e0; color: #fff; padding: 14px 28px; border: none; 
             border-radius: 6px; font-size: 16px; font-weight: 600; margin-top: 20px; 
@@ -32,15 +36,16 @@
         .btn.ready { background-color: #2b6cb0; cursor: pointer; box-shadow: 0 4px 6px rgba(43, 108, 176, 0.2); }
         .btn.ready:hover { background-color: #2c5282; }
 
+        /* Status Logs */
         #status-area { 
             margin-top: 20px; font-family: 'Consolas', monospace; font-size: 13px; 
             color: #4a5568; background: #edf2f7; padding: 15px; border-radius: 6px; 
-            text-align: left; max-height: 200px; overflow-y: auto; display: none; 
+            text-align: left; max-height: 200px; overflow-y: auto; display: block; 
             border-left: 4px solid #4299e1;
         }
-        
         .error-log { border-left-color: #e53e3e !important; color: #c53030 !important; background: #fff5f5 !important; }
 
+        /* Results Table */
         .table-responsive { overflow-x: auto; margin-top: 30px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
         table { width: 100%; border-collapse: collapse; min-width: 1000px; }
         thead th { background-color: #2d3748; color: white; padding: 15px; text-align: center; white-space: nowrap; position: sticky; top: 0; }
@@ -53,7 +58,7 @@
 </head>
 <body>
 
-    <h1>📊 v2 TSM Compliance Scorecard</h1>
+    <h1>📊 TSM Compliance Scorecard</h1>
     <p class="subtitle">Secure Browser Mode • Data Processed Locally</p>
 
     <div class="container">
@@ -77,15 +82,15 @@ import datetime
 from js import document, console, Uint8Array
 from pyodide.ffi import create_proxy
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (Matt Removed) ---
 TSM_NAMES = [
     "Adi Pandit", "Andrew Newhouse", "Eric Capponi", "Jeff Allen", 
-    "Lar Collicott", "Matt Swanson", "Michael Bielak", "Peter Nguyen", "Preston Millett"
+    "Lar Collicott", "Michael Bielak", "Peter Nguyen", "Preston Millett"
 ]
 CURRENT_DATE = pd.to_datetime("today")
 Q4_START_DATE = pd.to_datetime("2026-01-01")
 
-# --- UI HELPER ---
+# --- UI UTILS ---
 def log(message, is_error=False, clear=False):
     status_div = document.getElementById("status-area")
     if clear:
@@ -101,7 +106,6 @@ def log(message, is_error=False, clear=False):
     status_div.scrollTop = status_div.scrollHeight
     console.log(message)
 
-# --- LOGIC ---
 def get_compliance_circle(val):
     if val == 0: return "🟢"
     if 1 <= val <= 2: return "🟡"
@@ -117,6 +121,7 @@ def clean_columns(df):
     return df
 
 def find_header_and_read(f_io, is_csv):
+    # Scans first 30 rows to find header row automatically
     known_cols = ["consumption change owner", "primary assignee", "moment of value", "opportunity name"]
     try:
         if is_csv:
@@ -134,7 +139,6 @@ def find_header_and_read(f_io, is_csv):
         f_io.seek(0)
         if is_csv: return pd.read_csv(f_io, header=header_row)
         else: return pd.read_excel(f_io, header=header_row)
-            
     except Exception as e:
         log(f"Header warning: {e}")
         f_io.seek(0)
@@ -267,10 +271,10 @@ async def process_click(event):
                     created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
                     results["MOVs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
-        # --- GENERATE HTML (Triple Quoted Strings to fix SyntaxError) ---
+        # --- GENERATE HTML ---
         results = results.fillna(0)
         
-        # We build the HTML string carefully using triple quotes
+        # We build the HTML using TRIPLE QUOTES to avoid quoting errors
         html_parts = []
         html_parts.append("""<table><thead><tr><th>TSM Name</th>""")
         
@@ -291,7 +295,6 @@ async def process_click(event):
                     c = map_cols[i]
                     val = int(row.get(c, 0))
                     circle = get_compliance_circle(val)
-                    # Triple quotes allow double quotes inside safely
                     html_parts.append(f"""<td><div class="score-cell"><span>{circle}</span><span>{val}</span></div></td>""")
                 
                 # Performance
@@ -311,8 +314,7 @@ async def process_click(event):
         
         html_parts.append("</tbody></table>")
         
-        final_html = "".join(html_parts)
-        document.getElementById("output").innerHTML = final_html
+        document.getElementById("output").innerHTML = "".join(html_parts)
         log("✅ Done! Table generated below.", is_error=False)
 
     except Exception as e:
@@ -326,12 +328,4 @@ def main():
         btn = document.getElementById("run_btn")
         btn.addEventListener("click", create_proxy(process_click))
         btn.disabled = False
-        btn.innerText = "Generate Scorecard"
-        btn.classList.add("ready")
-    except Exception as e:
-        log(f"Startup Error: {e}", is_error=True)
-
-main()
-    </py-script>
-</body>
-</html>
+        btn.innerText = "Generate
