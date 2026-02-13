@@ -9,7 +9,6 @@
     <script defer src="https://pyscript.net/releases/2023.05.1/pyscript.js"></script>
 
     <style>
-        /* Visual Styles */
         body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f6f8; color: #333; }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
         p.subtitle { text-align: center; color: #7f8c8d; margin-bottom: 30px; }
@@ -36,11 +35,12 @@
         #status-area { 
             margin-top: 20px; font-family: 'Consolas', monospace; font-size: 13px; 
             color: #4a5568; background: #edf2f7; padding: 15px; border-radius: 6px; 
-            text-align: left; max-height: 150px; overflow-y: auto; display: none; 
+            text-align: left; max-height: 200px; overflow-y: auto; display: block; 
             border-left: 4px solid #4299e1;
         }
         
         .error-log { border-left-color: #e53e3e !important; color: #c53030 !important; background: #fff5f5 !important; }
+        .success-log { border-left-color: #48bb78 !important; background: #f0fff4 !important; }
 
         .table-responsive { overflow-x: auto; margin-top: 30px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
         table { width: 100%; border-collapse: collapse; min-width: 1000px; }
@@ -54,16 +54,16 @@
 </head>
 <body>
 
-    <h1>📊 v2 TSM Compliance Scorecard</h1>
+    <h1>📊 TSM Compliance Scorecard</h1>
     <p class="subtitle">Secure Browser Mode • Data Processed Locally</p>
 
     <div class="container">
         <p style="margin-bottom: 10px; font-weight: 500;">Select your 5 Salesforce Reports (CSV or Excel)</p>
         <input type="file" id="file_upload" multiple accept=".csv, .xlsx">
-        <button id="run_btn" class="btn" disabled>⏳ Initializing Python...</button>
+        <button id="run_btn" class="btn" disabled>⏳ Loading Python Environment...</button>
     </div>
 
-    <div id="status-area"></div>
+    <div id="status-area">System Status: initializing...</div>
     <div id="output" class="table-responsive"></div>
 
     <py-config>
@@ -86,23 +86,25 @@ TSM_NAMES = [
 CURRENT_DATE = pd.to_datetime("today")
 Q4_START_DATE = pd.to_datetime("2026-01-01")
 
-# --- UI LOGGING ---
+# --- UTILS ---
 def log(message, is_error=False, clear=False):
     status_div = document.getElementById("status-area")
     if clear:
         status_div.innerHTML = ""
         status_div.style.display = "none"
-        status_div.classList.remove("error-log")
+        status_div.className = "" # Reset classes
         return
     
     status_div.style.display = "block"
-    if is_error: status_div.classList.add("error-log")
+    if is_error: 
+        status_div.classList.add("error-log")
+        console.error(message)
+    else:
+        console.log(message)
     
     status_div.innerHTML += f"<div>{message}</div>"
     status_div.scrollTop = status_div.scrollHeight
-    console.log(message)
 
-# --- LOGIC ---
 def get_compliance_circle(val):
     if val == 0: return "🟢"
     if 1 <= val <= 2: return "🟡"
@@ -114,15 +116,15 @@ def get_performance_circle(val):
     return "🔴"
 
 def clean_columns(df):
+    # Robust cleanup for funky Salesforce headers
     df.columns = [str(c).split("↑")[0].strip().replace(":", "").replace("  ", " ") for c in df.columns]
     return df
 
 def find_header_and_read(f_io, is_csv):
-    # Reads the first 30 rows to find a known column name, then reads the full file
+    # Reads the first 30 rows to find a known column name
     known_cols = ["consumption change owner", "primary assignee", "moment of value", "opportunity name"]
     
     try:
-        # Step 1: Scan for header
         if is_csv:
             temp_df = pd.read_csv(f_io, header=None, nrows=30)
         else:
@@ -135,7 +137,6 @@ def find_header_and_read(f_io, is_csv):
                 header_row = idx
                 break
         
-        # Step 2: Read actual file
         f_io.seek(0)
         if is_csv:
             return pd.read_csv(f_io, header=header_row)
@@ -143,7 +144,7 @@ def find_header_and_read(f_io, is_csv):
             return pd.read_excel(f_io, header=header_row)
             
     except Exception as e:
-        log(f"Warning during header scan: {e}")
+        log(f"Warning: Could not auto-detect header. Using default. ({e})")
         f_io.seek(0)
         if is_csv: return pd.read_csv(f_io)
         return pd.read_excel(f_io)
@@ -157,18 +158,17 @@ async def process_click(event):
         files = file_input.files
         
         if files.length == 0:
-            log("⚠️ Please upload files first.")
+            log("⚠️ Please upload files first.", is_error=True)
             return
 
         files_content = {}
-        log(f"📂 Reading {files.length} files...")
+        log(f"📂 Reading {files.length} files into memory...")
 
         for i in range(files.length):
             file = files.item(i)
+            # Optimized reading method
             array_buffer = await file.arrayBuffer()
-            # Optimized byte conversion
-            bytes_data = array_buffer.to_py()
-            files_content[file.name] = bytes(bytes_data)
+            files_content[file.name] = array_buffer.to_py()
 
         # Process Dataframes
         dfs = {
@@ -180,13 +180,14 @@ async def process_click(event):
         for filename, content in files_content.items():
             fname = filename.lower()
             try:
-                f_io = io.BytesIO(content)
+                # Convert memory view to bytes explicitly for Pandas
+                f_io = io.BytesIO(bytes(content))
                 is_csv = filename.endswith(".csv")
                 
-                # Use robust header finder for BOTH csv and excel
                 df = find_header_and_read(f_io, is_csv)
                 df = clean_columns(df)
                 
+                # Logic to determine file type
                 if "no wi" in fname: dfs["cos_no_wi"] = df
                 elif "perspective - cos" in fname: dfs["cos"] = df
                 elif "wis created" in fname: dfs["wis_created"] = df
@@ -205,13 +206,11 @@ async def process_click(event):
         def filter_tsm(df, col):
             if col not in df.columns: return pd.DataFrame()
             df[col] = df[col].fillna(method='ffill')
-            # Handle subtotals safely
             df = df[~df[col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
             
-            # Safe date conversion
-            for c in df.columns:
-                if "Date" in c: df[c] = pd.to_datetime(df[c], errors='coerce')
-            if "Amount" in df.columns: df["Amount"] = pd.to_numeric(df["Amount"], errors='coerce').fillna(0)
+            # Safe numeric conversion
+            if "Amount" in df.columns:
+                df["Amount"] = pd.to_numeric(df["Amount"], errors='coerce').fillna(0)
             
             lower_names = [n.lower() for n in TSM_NAMES]
             return df[df[col].astype(str).str.lower().isin(lower_names)]
@@ -222,6 +221,10 @@ async def process_click(event):
             if col in dfs["cos"].columns:
                 df = filter_tsm(dfs["cos"], col)
                 if not df.empty:
+                    # Fix Dates
+                    for d_col in ["Last Modified Date", "Launch Date", "Close Date", "Created Date"]:
+                        if d_col in df.columns: df[d_col] = pd.to_datetime(df[d_col], errors='coerce')
+
                     cutoff = CURRENT_DATE - pd.Timedelta(days=14)
                     
                     if "Next Steps" in df.columns:
@@ -255,8 +258,10 @@ async def process_click(event):
             if col in dfs["wis"].columns:
                 df = filter_tsm(dfs["wis"], col)
                 if not df.empty and "Status" in df.columns:
+                    for d_col in ["End Date", "Last Modified Date"]:
+                        if d_col in df.columns: df[d_col] = pd.to_datetime(df[d_col], errors='coerce')
+
                     active = df[~df["Status"].isin(["Completed", "Canceled", "Rejected"])]
-                    
                     overdue = active[active["End Date"] < CURRENT_DATE]
                     results["WIs_Overdue"] = results.index.map(overdue.groupby(overdue[col].str.title()).size()).fillna(0)
                     
@@ -270,6 +275,7 @@ async def process_click(event):
             if col in dfs["wis_created"].columns:
                 df = filter_tsm(dfs["wis_created"], col)
                 if not df.empty:
+                    if "Created Date" in df.columns: df["Created Date"] = pd.to_datetime(df["Created Date"], errors='coerce')
                     created = df[df["Created Date"] >= Q4_START_DATE]
                     results["WIs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
@@ -279,6 +285,7 @@ async def process_click(event):
             if col in dfs["movs"].columns:
                 df = filter_tsm(dfs["movs"], col)
                 if not df.empty:
+                    if "Moment of Value Created Date" in df.columns: df["Moment of Value Created Date"] = pd.to_datetime(df["Moment of Value Created Date"], errors='coerce')
                     created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
                     results["MOVs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
@@ -321,18 +328,23 @@ async def process_click(event):
         
         html += "</tbody></table>"
         document.getElementById("output").innerHTML = html
-        log("✅ Done! Table generated below.")
+        log("✅ Success! Scroll down to see table.", is_error=False)
 
     except Exception as e:
-        log(f"🔥 Critical Error: {str(e)}", is_error=True)
+        log(f"🔥 CRITICAL ERROR: {str(e)}", is_error=True)
         console.error(e)
 
+# --- STARTUP ---
 def main():
-    btn = document.getElementById("run_btn")
-    btn.addEventListener("click", create_proxy(process_click))
-    btn.disabled = False
-    btn.innerText = "Generate Scorecard"
-    btn.classList.add("ready")
+    try:
+        log("System: Python Loaded Successfully.")
+        btn = document.getElementById("run_btn")
+        btn.addEventListener("click", create_proxy(process_click))
+        btn.disabled = False
+        btn.innerText = "Generate Scorecard"
+        btn.classList.add("ready")
+    except Exception as e:
+        log(f"Startup Error: {e}", is_error=True)
 
 main()
     </py-script>
