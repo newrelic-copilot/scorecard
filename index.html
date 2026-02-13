@@ -35,12 +35,11 @@
         #status-area { 
             margin-top: 20px; font-family: 'Consolas', monospace; font-size: 13px; 
             color: #4a5568; background: #edf2f7; padding: 15px; border-radius: 6px; 
-            text-align: left; max-height: 200px; overflow-y: auto; display: block; 
+            text-align: left; max-height: 200px; overflow-y: auto; display: none; 
             border-left: 4px solid #4299e1;
         }
         
         .error-log { border-left-color: #e53e3e !important; color: #c53030 !important; background: #fff5f5 !important; }
-        .success-log { border-left-color: #48bb78 !important; background: #f0fff4 !important; }
 
         .table-responsive { overflow-x: auto; margin-top: 30px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
         table { width: 100%; border-collapse: collapse; min-width: 1000px; }
@@ -54,7 +53,7 @@
 </head>
 <body>
 
-    <h1>📊 TSM Compliance Scorecard</h1>
+    <h1>📊 v2 TSM Compliance Scorecard</h1>
     <p class="subtitle">Secure Browser Mode • Data Processed Locally</p>
 
     <div class="container">
@@ -86,25 +85,23 @@ TSM_NAMES = [
 CURRENT_DATE = pd.to_datetime("today")
 Q4_START_DATE = pd.to_datetime("2026-01-01")
 
-# --- UTILS ---
+# --- UI HELPER ---
 def log(message, is_error=False, clear=False):
     status_div = document.getElementById("status-area")
     if clear:
         status_div.innerHTML = ""
         status_div.style.display = "none"
-        status_div.className = "" # Reset classes
+        status_div.className = ""
         return
     
     status_div.style.display = "block"
-    if is_error: 
-        status_div.classList.add("error-log")
-        console.error(message)
-    else:
-        console.log(message)
+    if is_error: status_div.classList.add("error-log")
     
     status_div.innerHTML += f"<div>{message}</div>"
     status_div.scrollTop = status_div.scrollHeight
+    console.log(message)
 
+# --- LOGIC ---
 def get_compliance_circle(val):
     if val == 0: return "🟢"
     if 1 <= val <= 2: return "🟡"
@@ -116,14 +113,11 @@ def get_performance_circle(val):
     return "🔴"
 
 def clean_columns(df):
-    # Robust cleanup for funky Salesforce headers
     df.columns = [str(c).split("↑")[0].strip().replace(":", "").replace("  ", " ") for c in df.columns]
     return df
 
 def find_header_and_read(f_io, is_csv):
-    # Reads the first 30 rows to find a known column name
     known_cols = ["consumption change owner", "primary assignee", "moment of value", "opportunity name"]
-    
     try:
         if is_csv:
             temp_df = pd.read_csv(f_io, header=None, nrows=30)
@@ -138,13 +132,11 @@ def find_header_and_read(f_io, is_csv):
                 break
         
         f_io.seek(0)
-        if is_csv:
-            return pd.read_csv(f_io, header=header_row)
-        else:
-            return pd.read_excel(f_io, header=header_row)
+        if is_csv: return pd.read_csv(f_io, header=header_row)
+        else: return pd.read_excel(f_io, header=header_row)
             
     except Exception as e:
-        log(f"Warning: Could not auto-detect header. Using default. ({e})")
+        log(f"Header warning: {e}")
         f_io.seek(0)
         if is_csv: return pd.read_csv(f_io)
         return pd.read_excel(f_io)
@@ -162,11 +154,10 @@ async def process_click(event):
             return
 
         files_content = {}
-        log(f"📂 Reading {files.length} files into memory...")
+        log(f"📂 Reading {files.length} files...")
 
         for i in range(files.length):
             file = files.item(i)
-            # Optimized reading method
             array_buffer = await file.arrayBuffer()
             files_content[file.name] = array_buffer.to_py()
 
@@ -180,14 +171,12 @@ async def process_click(event):
         for filename, content in files_content.items():
             fname = filename.lower()
             try:
-                # Convert memory view to bytes explicitly for Pandas
                 f_io = io.BytesIO(bytes(content))
                 is_csv = filename.endswith(".csv")
                 
                 df = find_header_and_read(f_io, is_csv)
                 df = clean_columns(df)
                 
-                # Logic to determine file type
                 if "no wi" in fname: dfs["cos_no_wi"] = df
                 elif "perspective - cos" in fname: dfs["cos"] = df
                 elif "wis created" in fname: dfs["wis_created"] = df
@@ -195,7 +184,6 @@ async def process_click(event):
                 elif "movs" in fname: dfs["movs"] = df
                 
                 log(f"   ✅ Parsed: {filename}")
-                
             except Exception as e:
                 log(f"❌ Error in {filename}: {e}", is_error=True)
 
@@ -207,10 +195,9 @@ async def process_click(event):
             if col not in df.columns: return pd.DataFrame()
             df[col] = df[col].fillna(method='ffill')
             df = df[~df[col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
-            
-            # Safe numeric conversion
-            if "Amount" in df.columns:
-                df["Amount"] = pd.to_numeric(df["Amount"], errors='coerce').fillna(0)
+            for c in df.columns:
+                if "Date" in c: df[c] = pd.to_datetime(df[c], errors='coerce')
+            if "Amount" in df.columns: df["Amount"] = pd.to_numeric(df["Amount"], errors='coerce').fillna(0)
             
             lower_names = [n.lower() for n in TSM_NAMES]
             return df[df[col].astype(str).str.lower().isin(lower_names)]
@@ -221,10 +208,6 @@ async def process_click(event):
             if col in dfs["cos"].columns:
                 df = filter_tsm(dfs["cos"], col)
                 if not df.empty:
-                    # Fix Dates
-                    for d_col in ["Last Modified Date", "Launch Date", "Close Date", "Created Date"]:
-                        if d_col in df.columns: df[d_col] = pd.to_datetime(df[d_col], errors='coerce')
-
                     cutoff = CURRENT_DATE - pd.Timedelta(days=14)
                     
                     if "Next Steps" in df.columns:
@@ -258,9 +241,6 @@ async def process_click(event):
             if col in dfs["wis"].columns:
                 df = filter_tsm(dfs["wis"], col)
                 if not df.empty and "Status" in df.columns:
-                    for d_col in ["End Date", "Last Modified Date"]:
-                        if d_col in df.columns: df[d_col] = pd.to_datetime(df[d_col], errors='coerce')
-
                     active = df[~df["Status"].isin(["Completed", "Canceled", "Rejected"])]
                     overdue = active[active["End Date"] < CURRENT_DATE]
                     results["WIs_Overdue"] = results.index.map(overdue.groupby(overdue[col].str.title()).size()).fillna(0)
@@ -275,7 +255,6 @@ async def process_click(event):
             if col in dfs["wis_created"].columns:
                 df = filter_tsm(dfs["wis_created"], col)
                 if not df.empty:
-                    if "Created Date" in df.columns: df["Created Date"] = pd.to_datetime(df["Created Date"], errors='coerce')
                     created = df[df["Created Date"] >= Q4_START_DATE]
                     results["WIs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
@@ -285,50 +264,56 @@ async def process_click(event):
             if col in dfs["movs"].columns:
                 df = filter_tsm(dfs["movs"], col)
                 if not df.empty:
-                    if "Moment of Value Created Date" in df.columns: df["Moment of Value Created Date"] = pd.to_datetime(df["Moment of Value Created Date"], errors='coerce')
                     created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
                     results["MOVs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
-        # --- GENERATE HTML ---
+        # --- GENERATE HTML (Triple Quoted Strings to fix SyntaxError) ---
         results = results.fillna(0)
         
-        html = "<table><thead><tr><th>TSM Name</th>"
+        # We build the HTML string carefully using triple quotes
+        html_parts = []
+        html_parts.append("""<table><thead><tr><th>TSM Name</th>""")
+        
         headers = ["No WI", "Missing Notes", "Stale Updates", "Past Launch", "Expired Exec", "WIs Overdue", "WIs Stale", "COs Created", "COs $$$", "WIs Created", "MOVs Created"]
         map_cols = ["COs_No_WI", "COs_Missing_Notes", "COs_Stale", "COs_Past_Launch", "COs_Expired", "WIs_Overdue", "WIs_Stale", "COs_Created", "COs_Amount", "WIs_Created", "MOVs_Created"]
         
-        for h in headers: html += f"<th>{h}</th>"
-        html += "</tr></thead><tbody>"
+        for h in headers: 
+            html_parts.append(f"<th>{h}</th>")
+        html_parts.append("""</tr></thead><tbody>""")
         
         for tsm in TSM_NAMES:
             if tsm in results.index:
                 row = results.loc[tsm]
-                html += f"<tr><td>{tsm}</td>"
+                html_parts.append(f"<tr><td>{tsm}</td>")
                 
                 # Compliance
                 for i in range(7):
                     c = map_cols[i]
                     val = int(row.get(c, 0))
                     circle = get_compliance_circle(val)
-                    html += f"<td><div class='score-cell'><span>{circle}</span><span>{val}</span></div></td>"
+                    # Triple quotes allow double quotes inside safely
+                    html_parts.append(f"""<td><div class="score-cell"><span>{circle}</span><span>{val}</span></div></td>""")
                 
                 # Performance
                 val = int(row.get("COs_Created", 0))
-                html += f"<td><div class='score-cell'><span>{get_performance_circle(val)}</span><span>{val}</span></div></td>"
+                html_parts.append(f"""<td><div class="score-cell"><span>{get_performance_circle(val)}</span><span>{val}</span></div></td>""")
                 
                 val = row.get("COs_Amount", 0)
-                html += f"<td>${val:,.0f}</td>"
+                html_parts.append(f"""<td>${val:,.0f}</td>""")
                 
                 val = int(row.get("WIs_Created", 0))
-                html += f"<td><div class='score-cell'><span>{get_performance_circle(val)}</span><span>{val}</span></div></td>"
+                html_parts.append(f"""<td><div class="score-cell"><span>{get_performance_circle(val)}</span><span>{val}</span></div></td>""")
                 
                 val = int(row.get("MOVs_Created", 0))
-                html += f"<td><div class='score-cell'><span>{get_performance_circle(val)}</span><span>{val}</span></div></td>"
+                html_parts.append(f"""<td><div class="score-cell"><span>{get_performance_circle(val)}</span><span>{val}</span></div></td>""")
                 
-                html += "</tr>"
+                html_parts.append("</tr>")
         
-        html += "</tbody></table>"
-        document.getElementById("output").innerHTML = html
-        log("✅ Success! Scroll down to see table.", is_error=False)
+        html_parts.append("</tbody></table>")
+        
+        final_html = "".join(html_parts)
+        document.getElementById("output").innerHTML = final_html
+        log("✅ Done! Table generated below.", is_error=False)
 
     except Exception as e:
         log(f"🔥 CRITICAL ERROR: {str(e)}", is_error=True)
