@@ -3,138 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Updated TSM Scorecard Generator</title>
+    <title>TSM Scorecard Generator</title>
     
     <link rel="stylesheet" href="https://pyscript.net/releases/2023.05.1/pyscript.css" />
     <script defer src="https://pyscript.net/releases/2023.05.1/pyscript.js"></script>
 
     <style>
-        /* Modern Reset & Typography */
+        /* Visual Styles */
         body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 20px; background-color: #f4f6f8; color: #333; }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
         p.subtitle { text-align: center; color: #7f8c8d; margin-bottom: 30px; }
 
-        /* Card Container */
         .container { 
-            background: white; 
-            max-width: 800px; 
-            margin: 0 auto; 
-            padding: 30px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
-            text-align: center;
+            background: white; max-width: 900px; margin: 0 auto; padding: 30px; 
+            border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;
         }
 
-        /* File Input Styling */
         input[type="file"] {
-            border: 2px dashed #cbd5e0;
-            padding: 20px;
-            width: 100%;
-            box-sizing: border-box;
-            border-radius: 8px;
-            background-color: #fafbfc;
-            cursor: pointer;
+            border: 2px dashed #cbd5e0; padding: 20px; width: 100%; box-sizing: border-box;
+            border-radius: 8px; background-color: #fafbfc; cursor: pointer;
         }
         input[type="file"]:hover { border-color: #4299e1; background-color: #ebf8ff; }
 
-        /* Button Styling */
         .btn { 
-            background-color: #cbd5e0; 
-            color: #fff; 
-            padding: 14px 28px; 
-            border: none; 
-            border-radius: 6px; 
-            font-size: 16px; 
-            font-weight: 600; 
-            margin-top: 20px; 
-            cursor: not-allowed; 
-            width: 100%;
-            transition: all 0.3s ease;
+            background-color: #cbd5e0; color: #fff; padding: 14px 28px; border: none; 
+            border-radius: 6px; font-size: 16px; font-weight: 600; margin-top: 20px; 
+            cursor: not-allowed; width: 100%; transition: all 0.3s ease;
         }
-        .btn.ready { 
-            background-color: #2b6cb0; 
-            cursor: pointer; 
-            box-shadow: 0 4px 6px rgba(43, 108, 176, 0.2); 
-        }
-        .btn.ready:hover { background-color: #2c5282; transform: translateY(-1px); }
-        .btn:active { transform: translateY(0); }
+        .btn.ready { background-color: #2b6cb0; cursor: pointer; box-shadow: 0 4px 6px rgba(43, 108, 176, 0.2); }
+        .btn.ready:hover { background-color: #2c5282; }
 
-        /* Status Log Area */
         #status-area { 
-            margin-top: 20px; 
-            font-family: 'Consolas', 'Monaco', monospace; 
-            font-size: 13px; 
-            color: #4a5568; 
-            background: #edf2f7; 
-            padding: 15px; 
-            border-radius: 6px; 
-            text-align: left; 
-            max-height: 150px; 
-            overflow-y: auto; 
-            display: none; /* Hidden by default */
+            margin-top: 20px; font-family: 'Consolas', monospace; font-size: 13px; 
+            color: #4a5568; background: #edf2f7; padding: 15px; border-radius: 6px; 
+            text-align: left; max-height: 150px; overflow-y: auto; display: none; 
             border-left: 4px solid #4299e1;
         }
+        
+        .error-log { border-left-color: #e53e3e !important; color: #c53030 !important; background: #fff5f5 !important; }
 
-        /* Table Styling */
-        .table-responsive {
-            overflow-x: auto;
-            margin-top: 30px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        }
-        
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            min-width: 1000px; /* Forces scroll on small screens */
-        }
-        
-        thead th { 
-            background-color: #2d3748; 
-            color: white; 
-            padding: 15px; 
-            text-align: center; 
-            font-weight: 600;
-            white-space: nowrap;
-            position: sticky;
-            top: 0;
-        }
-        
-        tbody td { 
-            padding: 12px 15px; 
-            border-bottom: 1px solid #e2e8f0; 
-            text-align: center;
-            vertical-align: middle;
-            font-size: 14px;
-        }
-        
-        tbody tr:last-child td { border-bottom: none; }
+        .table-responsive { overflow-x: auto; margin-top: 30px; background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        table { width: 100%; border-collapse: collapse; min-width: 1000px; }
+        thead th { background-color: #2d3748; color: white; padding: 15px; text-align: center; white-space: nowrap; position: sticky; top: 0; }
+        tbody td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; text-align: center; font-size: 14px; }
         tbody tr:hover { background-color: #f7fafc; }
+        tbody td:first-child { text-align: left; font-weight: bold; color: #2d3748; background-color: white; position: sticky; left: 0; border-right: 2px solid #e2e8f0; }
         
-        /* First column (Names) sticky and bold */
-        tbody td:first-child {
-            text-align: left;
-            font-weight: bold;
-            color: #2d3748;
-            background-color: white;
-            position: sticky;
-            left: 0;
-            border-right: 2px solid #e2e8f0;
-        }
-        
-        /* Circle Alignment */
-        .score-cell {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-        }
+        .score-cell { display: flex; align-items: center; justify-content: center; gap: 6px; }
     </style>
 </head>
 <body>
 
-    <h1>📊 TSM Compliance Scorecard</h1>
+    <h1>📊 v2 TSM Compliance Scorecard</h1>
     <p class="subtitle">Secure Browser Mode • Data Processed Locally</p>
 
     <div class="container">
@@ -144,7 +64,6 @@
     </div>
 
     <div id="status-area"></div>
-    
     <div id="output" class="table-responsive"></div>
 
     <py-config>
@@ -168,14 +87,17 @@ CURRENT_DATE = pd.to_datetime("today")
 Q4_START_DATE = pd.to_datetime("2026-01-01")
 
 # --- UI LOGGING ---
-def log(message, clear=False):
+def log(message, is_error=False, clear=False):
     status_div = document.getElementById("status-area")
     if clear:
         status_div.innerHTML = ""
         status_div.style.display = "none"
+        status_div.classList.remove("error-log")
         return
     
     status_div.style.display = "block"
+    if is_error: status_div.classList.add("error-log")
+    
     status_div.innerHTML += f"<div>{message}</div>"
     status_div.scrollTop = status_div.scrollHeight
     console.log(message)
@@ -195,6 +117,37 @@ def clean_columns(df):
     df.columns = [str(c).split("↑")[0].strip().replace(":", "").replace("  ", " ") for c in df.columns]
     return df
 
+def find_header_and_read(f_io, is_csv):
+    # Reads the first 30 rows to find a known column name, then reads the full file
+    known_cols = ["consumption change owner", "primary assignee", "moment of value", "opportunity name"]
+    
+    try:
+        # Step 1: Scan for header
+        if is_csv:
+            temp_df = pd.read_csv(f_io, header=None, nrows=30)
+        else:
+            temp_df = pd.read_excel(f_io, header=None, nrows=30)
+        
+        header_row = 0
+        for idx, row in temp_df.iterrows():
+            row_str = str(row.values).lower()
+            if any(col in row_str for col in known_cols):
+                header_row = idx
+                break
+        
+        # Step 2: Read actual file
+        f_io.seek(0)
+        if is_csv:
+            return pd.read_csv(f_io, header=header_row)
+        else:
+            return pd.read_excel(f_io, header=header_row)
+            
+    except Exception as e:
+        log(f"Warning during header scan: {e}")
+        f_io.seek(0)
+        if is_csv: return pd.read_csv(f_io)
+        return pd.read_excel(f_io)
+
 async def process_click(event):
     try:
         log("", clear=True)
@@ -213,7 +166,8 @@ async def process_click(event):
         for i in range(files.length):
             file = files.item(i)
             array_buffer = await file.arrayBuffer()
-            bytes_data = list(Uint8Array.new(array_buffer))
+            # Optimized byte conversion
+            bytes_data = array_buffer.to_py()
             files_content[file.name] = bytes(bytes_data)
 
         # Process Dataframes
@@ -227,20 +181,10 @@ async def process_click(event):
             fname = filename.lower()
             try:
                 f_io = io.BytesIO(content)
-                if filename.endswith(".csv"):
-                    # Header search
-                    temp_df = pd.read_csv(f_io, header=None, nrows=25)
-                    header_row = 0
-                    for idx, row in temp_df.iterrows():
-                        r_str = str(row.values).lower()
-                        if "consumption change owner" in r_str or "primary assignee" in r_str or "moment of value" in r_str:
-                            header_row = idx
-                            break
-                    f_io.seek(0)
-                    df = pd.read_csv(f_io, header=header_row)
-                else:
-                    df = pd.read_excel(f_io)
+                is_csv = filename.endswith(".csv")
                 
+                # Use robust header finder for BOTH csv and excel
+                df = find_header_and_read(f_io, is_csv)
                 df = clean_columns(df)
                 
                 if "no wi" in fname: dfs["cos_no_wi"] = df
@@ -249,8 +193,10 @@ async def process_click(event):
                 elif "perspective - tsm wis" in fname: dfs["wis"] = df
                 elif "movs" in fname: dfs["movs"] = df
                 
+                log(f"   ✅ Parsed: {filename}")
+                
             except Exception as e:
-                log(f"❌ Error in {filename}: {e}")
+                log(f"❌ Error in {filename}: {e}", is_error=True)
 
         # --- CALCULATIONS ---
         log("🧮 Calculating Metrics...")
@@ -259,7 +205,10 @@ async def process_click(event):
         def filter_tsm(df, col):
             if col not in df.columns: return pd.DataFrame()
             df[col] = df[col].fillna(method='ffill')
+            # Handle subtotals safely
             df = df[~df[col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
+            
+            # Safe date conversion
             for c in df.columns:
                 if "Date" in c: df[c] = pd.to_datetime(df[c], errors='coerce')
             if "Amount" in df.columns: df["Amount"] = pd.to_numeric(df["Amount"], errors='coerce').fillna(0)
@@ -269,66 +218,69 @@ async def process_click(event):
 
         # 1. COs
         if not dfs["cos"].empty:
-            df = filter_tsm(dfs["cos"], "Consumption Change Owner")
             col = "Consumption Change Owner"
-            if not df.empty:
-                cutoff = CURRENT_DATE - pd.Timedelta(days=14)
-                
-                # Missing Notes
-                if "Next Steps" in df.columns:
-                    missing = df[df["Next Steps"].isna() | (df["Next Steps"].astype(str).str.strip().isin(["-", ""]))]
-                    results["COs_Missing_Notes"] = results.index.map(missing.groupby(missing[col].str.title()).size()).fillna(0)
-                
-                # Stale
-                stale = df[df["Last Modified Date"] < cutoff]
-                results["COs_Stale"] = results.index.map(stale.groupby(stale[col].str.title()).size()).fillna(0)
-                
-                # Launch/Exec
-                past_launch = df[(df["Stage"] != "Execution") & (df["Launch Date"] < CURRENT_DATE)]
-                results["COs_Past_Launch"] = results.index.map(past_launch.groupby(past_launch[col].str.title()).size()).fillna(0)
-                
-                expired = df[(df["Stage"] == "Execution") & (df["Close Date"] < CURRENT_DATE)]
-                results["COs_Expired"] = results.index.map(expired.groupby(expired[col].str.title()).size()).fillna(0)
-                
-                # Created
-                created = df[df["Created Date"] >= Q4_START_DATE]
-                results["COs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
-                results["COs_Amount"] = results.index.map(created.groupby(created[col].str.title())["Amount"].sum()).fillna(0)
+            if col in dfs["cos"].columns:
+                df = filter_tsm(dfs["cos"], col)
+                if not df.empty:
+                    cutoff = CURRENT_DATE - pd.Timedelta(days=14)
+                    
+                    if "Next Steps" in df.columns:
+                        missing = df[df["Next Steps"].isna() | (df["Next Steps"].astype(str).str.strip().isin(["-", ""]))]
+                        results["COs_Missing_Notes"] = results.index.map(missing.groupby(missing[col].str.title()).size()).fillna(0)
+                    
+                    stale = df[df["Last Modified Date"] < cutoff]
+                    results["COs_Stale"] = results.index.map(stale.groupby(stale[col].str.title()).size()).fillna(0)
+                    
+                    past_launch = df[(df["Stage"] != "Execution") & (df["Launch Date"] < CURRENT_DATE)]
+                    results["COs_Past_Launch"] = results.index.map(past_launch.groupby(past_launch[col].str.title()).size()).fillna(0)
+                    
+                    expired = df[(df["Stage"] == "Execution") & (df["Close Date"] < CURRENT_DATE)]
+                    results["COs_Expired"] = results.index.map(expired.groupby(expired[col].str.title()).size()).fillna(0)
+                    
+                    created = df[df["Created Date"] >= Q4_START_DATE]
+                    results["COs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
+                    results["COs_Amount"] = results.index.map(created.groupby(created[col].str.title())["Amount"].sum()).fillna(0)
 
         # 2. No WI
         if not dfs["cos_no_wi"].empty:
-            df = filter_tsm(dfs["cos_no_wi"], "Consumption Change Owner")
-            if not df.empty:
-                results["COs_No_WI"] = results.index.map(df.groupby(df["Consumption Change Owner"].str.title()).size()).fillna(0)
+            col = "Consumption Change Owner"
+            if col in dfs["cos_no_wi"].columns:
+                df = filter_tsm(dfs["cos_no_wi"], col)
+                if not df.empty:
+                    results["COs_No_WI"] = results.index.map(df.groupby(df[col].str.title()).size()).fillna(0)
 
         # 3. WIs
         if not dfs["wis"].empty:
-            df = filter_tsm(dfs["wis"], "Primary Assignee Full Name")
             col = "Primary Assignee Full Name"
-            if not df.empty and "Status" in df.columns:
-                active = df[~df["Status"].isin(["Completed", "Canceled", "Rejected"])]
-                overdue = active[active["End Date"] < CURRENT_DATE]
-                results["WIs_Overdue"] = results.index.map(overdue.groupby(overdue[col].str.title()).size()).fillna(0)
-                
-                cutoff = CURRENT_DATE - pd.Timedelta(days=14)
-                stale = active[active["Last Modified Date"] < cutoff]
-                results["WIs_Stale"] = results.index.map(stale.groupby(stale[col].str.title()).size()).fillna(0)
+            if col in dfs["wis"].columns:
+                df = filter_tsm(dfs["wis"], col)
+                if not df.empty and "Status" in df.columns:
+                    active = df[~df["Status"].isin(["Completed", "Canceled", "Rejected"])]
+                    
+                    overdue = active[active["End Date"] < CURRENT_DATE]
+                    results["WIs_Overdue"] = results.index.map(overdue.groupby(overdue[col].str.title()).size()).fillna(0)
+                    
+                    cutoff = CURRENT_DATE - pd.Timedelta(days=14)
+                    stale = active[active["Last Modified Date"] < cutoff]
+                    results["WIs_Stale"] = results.index.map(stale.groupby(stale[col].str.title()).size()).fillna(0)
 
         # 4. WIs Created
         if not dfs["wis_created"].empty:
-            df = filter_tsm(dfs["wis_created"], "Primary Assignee Full Name")
             col = "Primary Assignee Full Name"
-            if not df.empty:
-                created = df[df["Created Date"] >= Q4_START_DATE]
-                results["WIs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
+            if col in dfs["wis_created"].columns:
+                df = filter_tsm(dfs["wis_created"], col)
+                if not df.empty:
+                    created = df[df["Created Date"] >= Q4_START_DATE]
+                    results["WIs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
         # 5. MOVs
         if not dfs["movs"].empty:
-            df = filter_tsm(dfs["movs"], "Moment of Value Created By")
             col = "Moment of Value Created By"
-            if not df.empty:
-                created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
-                results["MOVs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
+            if col in dfs["movs"].columns:
+                df = filter_tsm(dfs["movs"], col)
+                if not df.empty:
+                    created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
+                    results["MOVs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
         # --- GENERATE HTML ---
         results = results.fillna(0)
@@ -372,7 +324,7 @@ async def process_click(event):
         log("✅ Done! Table generated below.")
 
     except Exception as e:
-        log(f"🔥 Error: {str(e)}")
+        log(f"🔥 Critical Error: {str(e)}", is_error=True)
         console.error(e)
 
 def main():
