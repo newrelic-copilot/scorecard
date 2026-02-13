@@ -20,6 +20,7 @@
 
     <h1>📊 TSM Compliance Scorecard (Secure Browser Mode)</h1>
     <p>All processing happens locally in your browser. Data is never uploaded to a server.</p>
+    <p><i><b>Tip:</b> Right-click > Inspect > Console to see the Python logs in real-time.</i></p>
 
     <div class="container">
         <h3>Step 1: Select your 5 Salesforce Reports (CSV or Excel)</h3>
@@ -37,7 +38,7 @@
     <py-script>
 import pandas as pd
 import asyncio
-from js import document, FileReader
+from js import document, FileReader, console  # <--- Added 'console' import
 from pyodide.ffi import create_proxy
 import io
 import datetime
@@ -74,18 +75,15 @@ def load_dfs(files_content):
         "movs": pd.DataFrame()
     }
     
+    console.log("📂 Parsing files content...")
+
     for filename, content in files_content.items():
         fname = filename.lower()
         try:
             # Determine file type
             if filename.endswith(".csv"):
-                # We need to guess header row for CSVs in this specific reporting format
-                # Simple heuristic: read first few lines? 
-                # For simplicity in browser, we try standard offsets or 0 if clean.
-                # Salesforce reports usually have junk at top. Let's try to find the header.
-                # Since we can't easily "seek" in the bytes object multiple times without io wrapper:
                 f_io = io.BytesIO(content)
-                # Fallback strategy: Read with default, if col names look like metadata, re-read
+                # Heuristic to find header
                 temp_df = pd.read_csv(f_io, header=None, nrows=20)
                 
                 header_row = 0
@@ -101,32 +99,50 @@ def load_dfs(files_content):
             else:
                 # Excel
                 f_io = io.BytesIO(content)
-                df = pd.read_excel(f_io) # Pandas reads Excel headers better usually
+                df = pd.read_excel(f_io)
                 
             df = clean_columns(df)
             
             # Map to category
-            if "no wi" in fname: data["cos_no_wi"] = df
-            elif "perspective - cos" in fname and "no wi" not in fname: data["cos"] = df
-            elif "wis created" in fname: data["wis_created"] = df
-            elif "perspective - tsm wis" in fname: data["wis"] = df
-            elif "movs" in fname: data["movs"] = df
+            category = "Unknown"
+            if "no wi" in fname: 
+                data["cos_no_wi"] = df
+                category = "COs - No WI"
+            elif "perspective - cos" in fname and "no wi" not in fname: 
+                data["cos"] = df
+                category = "COs (Main)"
+            elif "wis created" in fname: 
+                data["wis_created"] = df
+                category = "WIs Created"
+            elif "perspective - tsm wis" in fname: 
+                data["wis"] = df
+                category = "Active WIs"
+            elif "movs" in fname: 
+                data["movs"] = df
+                category = "MOVs"
+            
+            console.log(f"   ✅ Parsed '{filename}' as [{category}] - {len(df)} rows")
             
         except Exception as e:
+            console.error(f"   ❌ Error reading {filename}: {str(e)}")
             print(f"Error reading {filename}: {e}")
             
     return data
 
 async def process_files(*args):
+    console.log("🚀 --- Starting TSM Scorecard Process ---")
     Element("output").write("Processing... please wait.")
     
     file_input = document.getElementById("file_upload")
     files = file_input.files
     
     if files.length == 0:
-        Element("output").write("Please select files first.")
+        msg = "Please select files first."
+        console.warn(msg)
+        Element("output").write(msg)
         return
 
+    console.log(f"📥 Detected {files.length} files uploaded.")
     files_content = {}
 
     # Read all files asynchronously
@@ -136,6 +152,7 @@ async def process_files(*args):
         # Convert JS ArrayBuffer to Python bytes
         bytes_data = array_buffer.to_py()
         files_content[file.name] = bytes(bytes_data)
+        console.log(f"   🔹 Read raw bytes for: {file.name}")
 
     # --- MAIN LOGIC ---
     dfs = load_dfs(files_content)
@@ -143,6 +160,8 @@ async def process_files(*args):
     results = pd.DataFrame(index=TSM_NAMES)
     results.index.name = "TSM Name"
     
+    console.log("🧮 Starting Metrics Calculations...")
+
     # 1. COs
     if not dfs["cos"].empty:
         df = dfs["cos"]
@@ -183,6 +202,8 @@ async def process_files(*args):
             created = df[df["Created Date"] >= Q4_START_DATE]
             results["COs_Created"] = results.index.map(created.groupby(created[owner_col].str.title()).size()).fillna(0)
             results["COs_Amount"] = results.index.map(created.groupby(created[owner_col].str.title())["Amount"].sum()).fillna(0)
+            
+            console.log("   ✅ Calculated CO Metrics")
 
     # 2. No WI
     if not dfs["cos_no_wi"].empty:
@@ -194,6 +215,7 @@ async def process_files(*args):
             tsm_lower = [t.lower() for t in TSM_NAMES]
             df = df[df[owner_col].astype(str).str.lower().isin(tsm_lower)]
             results["COs_No_WI"] = results.index.map(df.groupby(df[owner_col].str.title()).size()).fillna(0)
+            console.log("   ✅ Calculated No WI Metrics")
 
     # 3. WIs
     if not dfs["wis"].empty:
@@ -217,6 +239,7 @@ async def process_files(*args):
             cutoff = CURRENT_DATE - pd.Timedelta(days=14)
             stale = active[active["Last Modified Date"] < cutoff]
             results["WIs_Stale"] = results.index.map(stale.groupby(stale[owner_col].str.title()).size()).fillna(0)
+            console.log("   ✅ Calculated WI Metrics")
 
     # 4. WIs Created
     if not dfs["wis_created"].empty:
@@ -232,6 +255,7 @@ async def process_files(*args):
             
             created = df[df["Created Date"] >= Q4_START_DATE]
             results["WIs_Created"] = results.index.map(created.groupby(created[owner_col].str.title()).size()).fillna(0)
+            console.log("   ✅ Calculated WI Created Metrics")
 
     # 5. MOVs
     if not dfs["movs"].empty:
@@ -247,9 +271,11 @@ async def process_files(*args):
             
             created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
             results["MOVs_Created"] = results.index.map(created.groupby(created[owner_col].str.title()).size()).fillna(0)
+            console.log("   ✅ Calculated MOV Metrics")
 
     # --- RENDER TABLE ---
     results = results.fillna(0)
+    console.log("🎨 Rendering Table...")
     
     # Build HTML Table
     html = "<table><thead><tr><th>TSM Name</th>"
@@ -287,6 +313,7 @@ async def process_files(*args):
             
     html += "</tbody></table>"
     Element("output").element.innerHTML = html
+    console.log("🏁 Process Complete!")
 
     </py-script>
 </body>
