@@ -2,33 +2,36 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>TSM Compliance Scorecard</title>
+    <title>TSM Scorecard Generator</title>
     <link rel="stylesheet" href="https://pyscript.net/releases/2023.05.1/pyscript.css" />
     <script defer src="https://pyscript.net/releases/2023.05.1/pyscript.js"></script>
     <style>
-        body { font-family: sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; }
-        .container { border: 2px dashed #ccc; padding: 20px; text-align: center; margin-bottom: 20px; }
-        .btn { background-color: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; border-radius: 5px; font-size: 16px; margin-top: 10px; }
-        .btn:disabled { background-color: #ccc; }
-        #output { margin-top: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
+        body { font-family: sans-serif; padding: 20px; max-width: 1200px; margin: 0 auto; background-color: #f9f9f9; }
+        .container { background: white; border: 1px solid #ccc; padding: 30px; text-align: center; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .btn { background-color: #cccccc; color: white; padding: 12px 24px; border: none; cursor: not-allowed; border-radius: 5px; font-size: 16px; margin-top: 15px; font-weight: bold; transition: background 0.3s; }
+        .btn.ready { background-color: #007bff; cursor: pointer; }
+        .btn.ready:hover { background-color: #0056b3; }
+        #status-area { margin-top: 20px; font-family: monospace; color: #555; white-space: pre-wrap; text-align: left; background: #f0f0f0; padding: 10px; border-radius: 5px; max-height: 200px; overflow-y: auto; display: none;}
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #007bff; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
     </style>
 </head>
 <body>
 
-    <h1>📊 TSM Compliance Scorecard (Secure Browser Mode)</h1>
-    <p>All processing happens locally in your browser. Data is never uploaded to a server.</p>
-    <p><i><b>Tip:</b> Right-click > Inspect > Console to see the Python logs in real-time.</i></p>
+    <h1>📊 TSM Compliance Scorecard</h1>
+    <p>Secure Browser Mode: <i>Data is processed locally on your machine.</i></p>
 
     <div class="container">
-        <h3>Step 1: Select your 5 Salesforce Reports (CSV or Excel)</h3>
-        <input type="file" id="file_upload" multiple accept=".csv, .xlsx">
-        <br><br>
-        <button id="run_btn" class="btn" py-click="process_files">Generate Scorecard</button>
+        <h3>1. Select your 5 Salesforce Reports</h3>
+        <input type="file" id="file_upload" multiple accept=".csv, .xlsx" style="font-size: 16px;">
+        <br>
+        <button id="run_btn" class="btn" disabled>⏳ Loading Python Environment...</button>
     </div>
 
+    <div id="status-area"></div>
+    
     <div id="output"></div>
 
     <py-config>
@@ -38,10 +41,19 @@
     <py-script>
 import pandas as pd
 import asyncio
-from js import document, FileReader, console  # <--- Added 'console' import
-from pyodide.ffi import create_proxy
 import io
 import datetime
+from js import document, console, Uint8Array
+from pyodide.ffi import create_proxy
+
+# --- UI HELPER FUNCTIONS ---
+def log(message):
+    # Logs to the visible status area and browser console
+    status_div = document.getElementById("status-area")
+    status_div.style.display = "block"
+    status_div.innerHTML += f"<div>{message}</div>"
+    status_div.scrollTop = status_div.scrollHeight
+    console.log(message)
 
 # --- CONFIGURATION ---
 TSM_NAMES = [
@@ -51,7 +63,7 @@ TSM_NAMES = [
 CURRENT_DATE = pd.to_datetime("today")
 Q4_START_DATE = pd.to_datetime("2026-01-01")
 
-# --- LOGIC FUNCTIONS ---
+# --- LOGIC ---
 def get_compliance_circle(val):
     if val == 0: return "🟢"
     if 1 <= val <= 2: return "🟡"
@@ -66,255 +78,205 @@ def clean_columns(df):
     df.columns = [str(c).split("↑")[0].strip().replace(":", "").replace("  ", " ") for c in df.columns]
     return df
 
-def load_dfs(files_content):
-    data = {
-        "cos_no_wi": pd.DataFrame(),
-        "cos": pd.DataFrame(),
-        "wis": pd.DataFrame(),
-        "wis_created": pd.DataFrame(),
-        "movs": pd.DataFrame()
-    }
-    
-    console.log("📂 Parsing files content...")
+async def process_click(event):
+    try:
+        document.getElementById("status-area").innerHTML = "" # Clear previous logs
+        log("🚀 Starting Process...")
+        
+        file_input = document.getElementById("file_upload")
+        files = file_input.files
+        
+        if files.length == 0:
+            log("⚠️ No files selected. Please upload files first.")
+            return
 
-    for filename, content in files_content.items():
-        fname = filename.lower()
-        try:
-            # Determine file type
-            if filename.endswith(".csv"):
+        files_content = {}
+        log(f"📂 Reading {files.length} files...")
+
+        # Read files into memory
+        for i in range(files.length):
+            file = files.item(i)
+            array_buffer = await file.arrayBuffer()
+            # Convert to Python Bytes
+            bytes_data = list(Uint8Array.new(array_buffer)) # Safest conversion for this version
+            files_content[file.name] = bytes(bytes_data)
+            log(f"   🔹 Loaded: {file.name}")
+
+        # Process Dataframes
+        dfs = {
+            "cos_no_wi": pd.DataFrame(), "cos": pd.DataFrame(),
+            "wis": pd.DataFrame(), "wis_created": pd.DataFrame(),
+            "movs": pd.DataFrame()
+        }
+
+        for filename, content in files_content.items():
+            fname = filename.lower()
+            try:
                 f_io = io.BytesIO(content)
-                # Heuristic to find header
-                temp_df = pd.read_csv(f_io, header=None, nrows=20)
+                if filename.endswith(".csv"):
+                    # Header heuristic
+                    temp_df = pd.read_csv(f_io, header=None, nrows=25)
+                    header_row = 0
+                    for idx, row in temp_df.iterrows():
+                        r_str = str(row.values).lower()
+                        if "consumption change owner" in r_str or "primary assignee" in r_str or "moment of value" in r_str:
+                            header_row = idx
+                            break
+                    f_io.seek(0)
+                    df = pd.read_csv(f_io, header=header_row)
+                else:
+                    df = pd.read_excel(f_io)
                 
-                header_row = 0
-                for i, row in temp_df.iterrows():
-                    row_str = str(row.values).lower()
-                    if "consumption change owner" in row_str or "primary assignee" in row_str or "moment of value" in row_str:
-                        header_row = i
-                        break
+                df = clean_columns(df)
                 
-                f_io.seek(0)
-                df = pd.read_csv(f_io, header=header_row)
+                # Assign to categories
+                if "no wi" in fname: dfs["cos_no_wi"] = df
+                elif "perspective - cos" in fname: dfs["cos"] = df
+                elif "wis created" in fname: dfs["wis_created"] = df
+                elif "perspective - tsm wis" in fname: dfs["wis"] = df
+                elif "movs" in fname: dfs["movs"] = df
                 
-            else:
-                # Excel
-                f_io = io.BytesIO(content)
-                df = pd.read_excel(f_io)
-                
-            df = clean_columns(df)
-            
-            # Map to category
-            category = "Unknown"
-            if "no wi" in fname: 
-                data["cos_no_wi"] = df
-                category = "COs - No WI"
-            elif "perspective - cos" in fname and "no wi" not in fname: 
-                data["cos"] = df
-                category = "COs (Main)"
-            elif "wis created" in fname: 
-                data["wis_created"] = df
-                category = "WIs Created"
-            elif "perspective - tsm wis" in fname: 
-                data["wis"] = df
-                category = "Active WIs"
-            elif "movs" in fname: 
-                data["movs"] = df
-                category = "MOVs"
-            
-            console.log(f"   ✅ Parsed '{filename}' as [{category}] - {len(df)} rows")
-            
-        except Exception as e:
-            console.error(f"   ❌ Error reading {filename}: {str(e)}")
-            print(f"Error reading {filename}: {e}")
-            
-    return data
+            except Exception as e:
+                log(f"   ❌ Error processing {filename}: {e}")
 
-async def process_files(*args):
-    console.log("🚀 --- Starting TSM Scorecard Process ---")
-    Element("output").write("Processing... please wait.")
-    
-    file_input = document.getElementById("file_upload")
-    files = file_input.files
-    
-    if files.length == 0:
-        msg = "Please select files first."
-        console.warn(msg)
-        Element("output").write(msg)
-        return
-
-    console.log(f"📥 Detected {files.length} files uploaded.")
-    files_content = {}
-
-    # Read all files asynchronously
-    for i in range(files.length):
-        file = files.item(i)
-        array_buffer = await file.arrayBuffer()
-        # Convert JS ArrayBuffer to Python bytes
-        bytes_data = array_buffer.to_py()
-        files_content[file.name] = bytes(bytes_data)
-        console.log(f"   🔹 Read raw bytes for: {file.name}")
-
-    # --- MAIN LOGIC ---
-    dfs = load_dfs(files_content)
-    
-    results = pd.DataFrame(index=TSM_NAMES)
-    results.index.name = "TSM Name"
-    
-    console.log("🧮 Starting Metrics Calculations...")
-
-    # 1. COs
-    if not dfs["cos"].empty:
-        df = dfs["cos"]
-        owner_col = "Consumption Change Owner"
-        # Pre-process
-        if owner_col in df.columns:
-            df[owner_col] = df[owner_col].fillna(method='ffill')
-            df = df[~df[owner_col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
-            # Date conversion
-            for c in ["Last Modified Date", "Launch Date", "Close Date", "Created Date"]:
-                if c in df.columns: df[c] = pd.to_datetime(df[c], errors='coerce')
+        # --- CALCULATIONS ---
+        log("🧮 Calculating Scores...")
+        results = pd.DataFrame(index=TSM_NAMES)
+        
+        # Helper to filter TSM
+        def filter_tsm(df, col):
+            if col not in df.columns: return pd.DataFrame()
+            df[col] = df[col].fillna(method='ffill')
+            df = df[~df[col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
+            # Date conversions inside
+            for c in df.columns:
+                if "Date" in c: df[c] = pd.to_datetime(df[c], errors='coerce')
             if "Amount" in df.columns: df["Amount"] = pd.to_numeric(df["Amount"], errors='coerce').fillna(0)
             
-            # Filter TSM
-            tsm_lower = [t.lower() for t in TSM_NAMES]
-            df = df[df[owner_col].astype(str).str.lower().isin(tsm_lower)]
-            
-            # Calcs
-            cutoff = CURRENT_DATE - pd.Timedelta(days=14)
-            
-            # Missing Notes
-            if "Next Steps" in df.columns:
-                missing = df[df["Next Steps"].isna() | (df["Next Steps"].astype(str).str.strip().isin(["-", ""]))]
-                results["COs_Missing_Notes"] = results.index.map(missing.groupby(missing[owner_col].str.title()).size()).fillna(0)
-            
-            # Stale
-            stale = df[df["Last Modified Date"] < cutoff]
-            results["COs_Stale"] = results.index.map(stale.groupby(stale[owner_col].str.title()).size()).fillna(0)
-            
-            # Launch/Exec
-            past_launch = df[(df["Stage"] != "Execution") & (df["Launch Date"] < CURRENT_DATE)]
-            results["COs_Past_Launch"] = results.index.map(past_launch.groupby(past_launch[owner_col].str.title()).size()).fillna(0)
-            
-            expired = df[(df["Stage"] == "Execution") & (df["Close Date"] < CURRENT_DATE)]
-            results["COs_Expired"] = results.index.map(expired.groupby(expired[owner_col].str.title()).size()).fillna(0)
-            
-            # Created
-            created = df[df["Created Date"] >= Q4_START_DATE]
-            results["COs_Created"] = results.index.map(created.groupby(created[owner_col].str.title()).size()).fillna(0)
-            results["COs_Amount"] = results.index.map(created.groupby(created[owner_col].str.title())["Amount"].sum()).fillna(0)
-            
-            console.log("   ✅ Calculated CO Metrics")
+            lower_names = [n.lower() for n in TSM_NAMES]
+            return df[df[col].astype(str).str.lower().isin(lower_names)]
 
-    # 2. No WI
-    if not dfs["cos_no_wi"].empty:
-        df = dfs["cos_no_wi"]
-        owner_col = "Consumption Change Owner"
-        if owner_col in df.columns:
-            df[owner_col] = df[owner_col].fillna(method='ffill')
-            df = df[~df[owner_col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
-            tsm_lower = [t.lower() for t in TSM_NAMES]
-            df = df[df[owner_col].astype(str).str.lower().isin(tsm_lower)]
-            results["COs_No_WI"] = results.index.map(df.groupby(df[owner_col].str.title()).size()).fillna(0)
-            console.log("   ✅ Calculated No WI Metrics")
+        # 1. COs
+        if not dfs["cos"].empty:
+            df = filter_tsm(dfs["cos"], "Consumption Change Owner")
+            col = "Consumption Change Owner"
+            if not df.empty:
+                cutoff = CURRENT_DATE - pd.Timedelta(days=14)
+                
+                # Missing Notes
+                if "Next Steps" in df.columns:
+                    missing = df[df["Next Steps"].isna() | (df["Next Steps"].astype(str).str.strip().isin(["-", ""]))]
+                    results["COs_Missing_Notes"] = results.index.map(missing.groupby(missing[col].str.title()).size()).fillna(0)
+                
+                # Stale
+                stale = df[df["Last Modified Date"] < cutoff]
+                results["COs_Stale"] = results.index.map(stale.groupby(stale[col].str.title()).size()).fillna(0)
+                
+                # Launch/Exec
+                past_launch = df[(df["Stage"] != "Execution") & (df["Launch Date"] < CURRENT_DATE)]
+                results["COs_Past_Launch"] = results.index.map(past_launch.groupby(past_launch[col].str.title()).size()).fillna(0)
+                
+                expired = df[(df["Stage"] == "Execution") & (df["Close Date"] < CURRENT_DATE)]
+                results["COs_Expired"] = results.index.map(expired.groupby(expired[col].str.title()).size()).fillna(0)
+                
+                # Created
+                created = df[df["Created Date"] >= Q4_START_DATE]
+                results["COs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
+                results["COs_Amount"] = results.index.map(created.groupby(created[col].str.title())["Amount"].sum()).fillna(0)
 
-    # 3. WIs
-    if not dfs["wis"].empty:
-        df = dfs["wis"]
-        owner_col = "Primary Assignee Full Name"
-        if owner_col in df.columns:
-            df[owner_col] = df[owner_col].fillna(method='ffill')
-            df = df[~df[owner_col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
-            # Date conversion
-            for c in ["End Date", "Last Modified Date"]:
-                if c in df.columns: df[c] = pd.to_datetime(df[c], errors='coerce')
-            
-            tsm_lower = [t.lower() for t in TSM_NAMES]
-            df = df[df[owner_col].astype(str).str.lower().isin(tsm_lower)]
-            
-            active = df[~df["Status"].isin(["Completed", "Canceled", "Rejected"])]
-            
-            overdue = active[active["End Date"] < CURRENT_DATE]
-            results["WIs_Overdue"] = results.index.map(overdue.groupby(overdue[owner_col].str.title()).size()).fillna(0)
-            
-            cutoff = CURRENT_DATE - pd.Timedelta(days=14)
-            stale = active[active["Last Modified Date"] < cutoff]
-            results["WIs_Stale"] = results.index.map(stale.groupby(stale[owner_col].str.title()).size()).fillna(0)
-            console.log("   ✅ Calculated WI Metrics")
+        # 2. No WI
+        if not dfs["cos_no_wi"].empty:
+            df = filter_tsm(dfs["cos_no_wi"], "Consumption Change Owner")
+            if not df.empty:
+                results["COs_No_WI"] = results.index.map(df.groupby(df["Consumption Change Owner"].str.title()).size()).fillna(0)
 
-    # 4. WIs Created
-    if not dfs["wis_created"].empty:
-        df = dfs["wis_created"]
-        owner_col = "Primary Assignee Full Name"
-        if owner_col in df.columns:
-            df[owner_col] = df[owner_col].fillna(method='ffill')
-            df = df[~df[owner_col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
-            if "Created Date" in df.columns: df["Created Date"] = pd.to_datetime(df["Created Date"], errors='coerce')
-            
-            tsm_lower = [t.lower() for t in TSM_NAMES]
-            df = df[df[owner_col].astype(str).str.lower().isin(tsm_lower)]
-            
-            created = df[df["Created Date"] >= Q4_START_DATE]
-            results["WIs_Created"] = results.index.map(created.groupby(created[owner_col].str.title()).size()).fillna(0)
-            console.log("   ✅ Calculated WI Created Metrics")
+        # 3. WIs
+        if not dfs["wis"].empty:
+            df = filter_tsm(dfs["wis"], "Primary Assignee Full Name")
+            col = "Primary Assignee Full Name"
+            if not df.empty and "Status" in df.columns:
+                active = df[~df["Status"].isin(["Completed", "Canceled", "Rejected"])]
+                
+                overdue = active[active["End Date"] < CURRENT_DATE]
+                results["WIs_Overdue"] = results.index.map(overdue.groupby(overdue[col].str.title()).size()).fillna(0)
+                
+                cutoff = CURRENT_DATE - pd.Timedelta(days=14)
+                stale = active[active["Last Modified Date"] < cutoff]
+                results["WIs_Stale"] = results.index.map(stale.groupby(stale[col].str.title()).size()).fillna(0)
 
-    # 5. MOVs
-    if not dfs["movs"].empty:
-        df = dfs["movs"]
-        owner_col = "Moment of Value Created By"
-        if owner_col in df.columns:
-            df[owner_col] = df[owner_col].fillna(method='ffill')
-            df = df[~df[owner_col].astype(str).str.contains("Subtotal|Total", case=False, na=False)]
-            if "Moment of Value Created Date" in df.columns: df["Moment of Value Created Date"] = pd.to_datetime(df["Moment of Value Created Date"], errors='coerce')
-            
-            tsm_lower = [t.lower() for t in TSM_NAMES]
-            df = df[df[owner_col].astype(str).str.lower().isin(tsm_lower)]
-            
-            created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
-            results["MOVs_Created"] = results.index.map(created.groupby(created[owner_col].str.title()).size()).fillna(0)
-            console.log("   ✅ Calculated MOV Metrics")
+        # 4. WIs Created
+        if not dfs["wis_created"].empty:
+            df = filter_tsm(dfs["wis_created"], "Primary Assignee Full Name")
+            col = "Primary Assignee Full Name"
+            if not df.empty:
+                created = df[df["Created Date"] >= Q4_START_DATE]
+                results["WIs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
 
-    # --- RENDER TABLE ---
-    results = results.fillna(0)
-    console.log("🎨 Rendering Table...")
+        # 5. MOVs
+        if not dfs["movs"].empty:
+            df = filter_tsm(dfs["movs"], "Moment of Value Created By")
+            col = "Moment of Value Created By"
+            if not df.empty:
+                created = df[df["Moment of Value Created Date"] >= Q4_START_DATE]
+                results["MOVs_Created"] = results.index.map(created.groupby(created[col].str.title()).size()).fillna(0)
+
+        # --- GENERATE HTML ---
+        results = results.fillna(0)
+        
+        html = "<table><thead><tr><th>TSM Name</th>"
+        headers = ["No WI", "Missing Notes", "Stale Updates", "Past Launch", "Expired Exec", "WIs Overdue", "WIs Stale", "COs Created", "COs $$$", "WIs Created", "MOVs Created"]
+        map_cols = ["COs_No_WI", "COs_Missing_Notes", "COs_Stale", "COs_Past_Launch", "COs_Expired", "WIs_Overdue", "WIs_Stale", "COs_Created", "COs_Amount", "WIs_Created", "MOVs_Created"]
+        
+        for h in headers: html += f"<th>{h}</th>"
+        html += "</tr></thead><tbody>"
+        
+        for tsm in TSM_NAMES:
+            if tsm in results.index:
+                row = results.loc[tsm]
+                html += f"<tr><td><b>{tsm}</b></td>"
+                
+                # Compliance (First 7)
+                for i in range(7):
+                    c = map_cols[i]
+                    val = int(row.get(c, 0))
+                    html += f"<td>{get_compliance_circle(val)} {val}</td>"
+                
+                # Performance
+                val = int(row.get("COs_Created", 0))
+                html += f"<td>{get_performance_circle(val)} {val}</td>"
+                
+                val = row.get("COs_Amount", 0)
+                html += f"<td>${val:,.0f}</td>"
+                
+                val = int(row.get("WIs_Created", 0))
+                html += f"<td>{get_performance_circle(val)} {val}</td>"
+                
+                val = int(row.get("MOVs_Created", 0))
+                html += f"<td>{get_performance_circle(val)} {val}</td>"
+                
+                html += "</tr>"
+        
+        html += "</tbody></table>"
+        document.getElementById("output").innerHTML = html
+        log("✅ Done!")
+
+    except Exception as e:
+        log(f"🔥 CRITICAL ERROR: {str(e)}")
+        console.error(e)
+
+# --- INITIALIZATION ---
+def main():
+    btn = document.getElementById("run_btn")
+    # Attach event listener via Python proxy
+    btn.addEventListener("click", create_proxy(process_click))
     
-    # Build HTML Table
-    html = "<table><thead><tr><th>TSM Name</th>"
-    cols = ["COs_No_WI", "COs_Missing_Notes", "COs_Stale", "COs_Past_Launch", "COs_Expired", "WIs_Overdue", "WIs_Stale", "COs_Created", "COs_Amount", "WIs_Created", "MOVs_Created"]
-    headers = ["No WI", "Missing Notes", "Stale Updates", "Past Launch", "Expired Exec", "WIs Overdue", "WIs Stale", "COs Created", "COs $$$", "WIs Created", "MOVs Created"]
-    
-    for h in headers: html += f"<th>{h}</th>"
-    html += "</tr></thead><tbody>"
-    
-    for tsm in TSM_NAMES:
-        if tsm in results.index:
-            row = results.loc[tsm]
-            html += f"<tr><td>{tsm}</td>"
-            
-            # Compliance
-            for c in cols[:7]:
-                val = int(row.get(c, 0))
-                circle = get_compliance_circle(val)
-                html += f"<td>{circle} {val}</td>"
-            
-            # Performance
-            val = int(row.get("COs_Created", 0))
-            html += f"<td>{get_performance_circle(val)} {val}</td>"
-            
-            val = row.get("COs_Amount", 0)
-            html += f"<td>${val:,.0f}</td>"
-            
-            val = int(row.get("WIs_Created", 0))
-            html += f"<td>{get_performance_circle(val)} {val}</td>"
-            
-            val = int(row.get("MOVs_Created", 0))
-            html += f"<td>{get_performance_circle(val)} {val}</td>"
-            
-            html += "</tr>"
-            
-    html += "</tbody></table>"
-    Element("output").element.innerHTML = html
-    console.log("🏁 Process Complete!")
+    # Enable button visually
+    btn.disabled = False
+    btn.innerText = "Generate Scorecard (Ready)"
+    btn.classList.add("ready")
+    print("Python Loaded and Ready.")
 
+main()
     </py-script>
 </body>
 </html>
